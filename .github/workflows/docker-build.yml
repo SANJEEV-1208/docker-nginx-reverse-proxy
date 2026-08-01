@@ -32,3 +32,10 @@ jobs:
           context: ./nginx-proxy
           push: true
           tags: sanjeev1208/nginx-proxy:latest
+
+      - name: Build and push monitor image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./monitor-service
+          push: true
+          tags: sanjeev1208/monitor-service:latest
