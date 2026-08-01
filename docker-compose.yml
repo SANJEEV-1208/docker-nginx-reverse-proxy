@@ -14,3 +14,26 @@ services:
       - "80:80"
     depends_on:
       - backend
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppassword
+      POSTGRES_DB: monitoring
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  monitor:
+    build: ./monitor-service
+    container_name: monitor-container
+    depends_on:
+      - postgres
+    expose:
+      - "6000"
+
+volumes:
+  pgdata:
