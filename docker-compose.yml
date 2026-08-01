@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend-api
+    container_name: backend-container
+    expose:
+      - "5000"
+
+  nginx:
+    build: ./nginx-proxy
+    container_name: nginx-container
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
