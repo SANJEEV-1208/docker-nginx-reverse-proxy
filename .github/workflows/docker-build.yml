@@ -39,3 +39,10 @@ jobs:
           context: ./monitor-service
           push: true
           tags: sanjeev1208/monitor-service:latest
+
+      - name: Build and push log-analyzer image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./log-analyzer
+          push: true
+          tags: sanjeev1208/log-analyzer:latest
