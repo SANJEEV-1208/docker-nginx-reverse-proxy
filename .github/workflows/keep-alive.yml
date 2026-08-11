@@ -1,0 +1,17 @@
+name: Keep Render Services Alive
+
+on:
+  schedule:
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping all services
+        run: |
+          curl -s -o /dev/null -w "nginx-proxy: %{http_code}\n" https://nginx-proxy-jax8.onrender.com/ || true
+          curl -s -o /dev/null -w "backend-api: %{http_code}\n" https://backend-api-866z.onrender.com/api/status || true
+          curl -s -o /dev/null -w "monitor-service: %{http_code}\n" https://monitor-service-s916.onrender.com/sites || true
+          curl -s -o /dev/null -w "log-analyzer: %{http_code}\n" https://log-analyzer-c084.onrender.com/ || true
