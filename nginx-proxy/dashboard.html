@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Project Dashboard</title>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }
+    h1 { font-size: 1.4rem; display: flex; align-items: center; gap: 10px; }
+    h2 { font-size: 1.1rem; color: #94a3b8; margin-top: 32px; display: flex; align-items: center; gap: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+    .card { background: #1e293b; border-radius: 10px; padding: 16px; border-left: 4px solid #475569; }
+    .card.up { border-left-color: #22c55e; }
+    .card.down { border-left-color: #ef4444; }
+    .card .name { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+    .card .meta { color: #94a3b8; font-size: 0.85rem; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #334155; font-size: 0.9rem; }
+    th { color: #94a3b8; font-weight: 500; }
+    .badge { padding: 2px 8px; border-radius: 6px; font-size: 0.8rem; }
+    .badge.s2 { background: #14532d; color: #86efac; }
+    .badge.s4 { background: #7f1d1d; color: #fca5a5; }
+    .badge.s0 { background: #334155; color: #cbd5e1; }
+    .icon { width: 16px; height: 16px; flex-shrink: 0; }
+    .icon.green { color: #22c55e; }
+    .icon.red { color: #ef4444; }
+    .icon.lg { width: 22px; height: 22px; }
+  </style>
+</head>
+<body>
+  <h1><i data-lucide="server" class="icon lg"></i> Infrastructure Dashboard</h1>
+
+  <h2><i data-lucide="activity" class="icon"></i> Uptime Monitor</h2>
+  <div class="grid" id="sites-grid">Loading...</div>
+
+  <h2><i data-lucide="globe" class="icon"></i> Top IPs (Nginx traffic)</h2>
+  <table id="ips-table">
+    <thead><tr><th>IP Address</th><th>Requests</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2><i data-lucide="bar-chart-2" class="icon"></i> Status Code Breakdown</h2>
+  <table id="status-table">
+    <thead><tr><th>Status</th><th>Count</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2><i data-lucide="list" class="icon"></i> Recent Requests</h2>
+  <table id="logs-table">
+    <thead><tr><th>Time</th><th>Method</th><th>Path</th><th>Status</th><th>IP</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    function badgeClass(status) {
+      if (status >= 200 && status < 300) return 's2';
+      if (status >= 400) return 's4';
+      return 's0';
+    }
+
+    async function loadSites() {
+      const res = await fetch('/monitor/sites');
+      const sites = await res.json();
+      const grid = document.getElementById('sites-grid');
+      grid.innerHTML = '';
+
+      for (const site of sites) {
+        const checksRes = await fetch(`/monitor/sites/${site.id}/checks`);
+        const checks = await checksRes.json();
+        const latest = checks[0];
+        const isUp = latest ? latest.is_up : null;
+
+        const card = document.createElement('div');
+        card.className = `card ${isUp === true ? 'up' : isUp === false ? 'down' : ''}`;
+        card.innerHTML = `
+          <div class="name">
+            <i data-lucide="${isUp ? 'check-circle' : 'x-circle'}" class="icon ${isUp ? 'green' : 'red'}"></i>
+            ${site.name}
+          </div>
+          <div class="meta">${site.url}</div>
+          <div class="meta">${latest ? `${latest.is_up ? 'Up' : 'Down'} — ${latest.response_time_ms}ms — status ${latest.status_code}` : 'No checks yet'}</div>
+        `;
+        grid.appendChild(card);
+      }
+    }
+
+    async function loadTopIps() {
+      const res = await fetch('/logs/top-ips');
+      const data = await res.json();
+      const tbody = document.querySelector('#ips-table tbody');
+      tbody.innerHTML = data.map(row =>
+        `<tr><td>${row.ip_address}</td><td>${row.request_count}</td></tr>`
+      ).join('');
+    }
+
+    async function loadStatusSummary() {
+      const res = await fetch('/logs/status-summary');
+      const data = await res.json();
+      const tbody = document.querySelector('#status-table tbody');
+      tbody.innerHTML = data.map(row =>
+        `<tr><td><span class="badge ${badgeClass(row.status_code)}">${row.status_code}</span></td><td>${row.count}</td></tr>`
+      ).join('');
+    }
+
+    async function loadRecentLogs() {
+      const res = await fetch('/logs/');
+      const data = await res.json();
+      const tbody = document.querySelector('#logs-table tbody');
+      tbody.innerHTML = data.slice(0, 15).map(row =>
+        `<tr>
+          <td>${new Date(row.logged_at).toLocaleTimeString()}</td>
+          <td>${row.method}</td>
+          <td>${row.path}</td>
+          <td><span class="badge ${badgeClass(row.status_code)}">${row.status_code}</span></td>
+          <td>${row.ip_address}</td>
+        </tr>`
+      ).join('');
+    }
+
+    function loadAll() {
+      loadSites();
+      loadTopIps();
+      loadStatusSummary();
+      loadRecentLogs();
+      setTimeout(() => lucide.createIcons(), 100);
+    }
+
+    loadAll();
+    setInterval(loadAll, 15000);
+  </script>
+</body>
+</html>
