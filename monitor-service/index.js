@@ -5,6 +5,26 @@ const cron = require('node-cron');
 const app = express();
 app.use(express.json());
 
+const LOG_ANALYZER_URL = process.env.LOG_ANALYZER_URL;
+
+app.use((req, res, next) => {
+  res.on('finish', () => {
+    if (!LOG_ANALYZER_URL) return;
+    fetch(`${LOG_ANALYZER_URL}/ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ip: req.ip,
+        method: req.method,
+        path: req.path,
+        statusCode: res.statusCode,
+        userAgent: req.headers['user-agent']
+      })
+    }).catch(() => {});
+  });
+  next();
+});
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('neon.tech')
@@ -57,17 +77,16 @@ async function checkSite(site) {
         [site.id, result.statusCode, result.responseTime, result.isUp]
       );
       console.log(`Checked ${site.name}: ${result.statusCode} (${result.responseTime}ms)${attempt > 1 ? ` [succeeded on retry ${attempt}]` : ''}`);
-      return; // success — stop here, don't retry further
+      return;
     } catch (err) {
       lastError = err;
       console.log(`Checked ${site.name}: attempt ${attempt} failed (${err.message})`);
       if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 2000)); // wait 2s before retrying
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
   }
 
-  // Only reaches here if ALL attempts failed
   await pool.query(
     'INSERT INTO checks (site_id, status_code, response_time_ms, is_up) VALUES ($1, $2, $3, $4)',
     [site.id, 0, 0, false]

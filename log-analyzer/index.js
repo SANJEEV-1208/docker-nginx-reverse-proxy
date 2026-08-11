@@ -86,4 +86,20 @@ app.get('/status-summary', async (req, res) => {
   res.json(result.rows);
 });
 
+app.use(express.json());
+
+app.post('/ingest', async (req, res) => {
+  const { ip, method, path, statusCode, userAgent } = req.body;
+  try {
+    await pool.query(
+      'INSERT INTO log_entries (ip_address, method, path, status_code, response_size, user_agent) VALUES ($1, $2, $3, $4, $5, $6)',
+      [ip || 'unknown', method, path, statusCode, 0, userAgent || '']
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Ingest error:', err.message);
+    res.status(500).json({ ok: false });
+  }
+});
+
 app.listen(7000, '0.0.0.0', () => console.log('Log analyzer running on port 7000'));
