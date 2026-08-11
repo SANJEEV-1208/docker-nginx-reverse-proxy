@@ -6,11 +6,10 @@ const readline = require('readline');
 const app = express();
 
 const pool = new Pool({
-  user: 'appuser',
-  password: 'apppassword',
-  host: 'postgres',
-  database: 'monitoring',
-  port: 5432,
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('neon.tech')
+    ? { rejectUnauthorized: false }
+    : false
 });
 
 const LOG_PATH = '/var/log/nginx/access.log';

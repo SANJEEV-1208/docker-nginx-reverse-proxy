@@ -32,6 +32,8 @@ services:
     container_name: monitor-container
     depends_on:
       - postgres
+    environment:
+      - DATABASE_URL=postgresql://appuser:apppassword@postgres:5432/monitoring
     expose:
       - "6000"
 
@@ -40,6 +42,8 @@ services:
     container_name: log-analyzer-container
     depends_on:
       - postgres
+    environment:
+      - DATABASE_URL=postgresql://appuser:apppassword@postgres:5432/monitoring
     volumes:
       - nginx-logs:/var/log/nginx:ro
     expose:

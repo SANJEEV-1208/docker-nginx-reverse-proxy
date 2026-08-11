@@ -6,11 +6,10 @@ const app = express();
 app.use(express.json());
 
 const pool = new Pool({
-  user: 'appuser',
-  password: 'apppassword',
-  host: 'postgres',
-  database: 'monitoring',
-  port: 5432,
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('neon.tech')
+    ? { rejectUnauthorized: false }
+    : false
 });
 
 // Add a new site to monitor
