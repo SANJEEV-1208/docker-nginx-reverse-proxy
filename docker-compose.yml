@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build: ./backend-api
@@ -14,6 +12,8 @@ services:
       - "80:80"
     depends_on:
       - backend
+    volumes:
+      - nginx-logs:/var/log/nginx
 
   postgres:
     image: postgres:16-alpine
@@ -35,5 +35,16 @@ services:
     expose:
       - "6000"
 
+  log-analyzer:
+    build: ./log-analyzer
+    container_name: log-analyzer-container
+    depends_on:
+      - postgres
+    volumes:
+      - nginx-logs:/var/log/nginx:ro
+    expose:
+      - "7000"
+
 volumes:
   pgdata:
+  nginx-logs:
