@@ -1,42 +1,70 @@
 # Infrastructure Monitoring Platform
 
-A self-hosted, multi-service infrastructure monitoring platform — built with Docker Compose, exposed to the public internet via Cloudflare Tunnel, and fully automated with CI/CD. Includes a reverse-proxied backend API, an uptime monitor with retry logic, a log analytics engine that parses live Nginx traffic, and a live dashboard tying it all together.
+A self-hosted, multi-service infrastructure monitoring platform — built with Docker Compose, deployed to the cloud, and fully automated with CI/CD. Includes a reverse-proxied backend API, an uptime monitor with retry logic, a log analytics engine, and a live dashboard tying it all together.
 
-Built entirely on a local Windows/WSL environment, at zero infrastructure cost.
+**🔗 Live demo:** https://nginx-proxy-jax8.onrender.com/dashboard.html
+
+Originally built and debugged entirely on a local Windows/WSL environment, then migrated to a fully cloud-hosted deployment — at zero infrastructure cost.
 
 ## Architecture
 
+Two deployment variants exist, documented honestly below, because they genuinely differ in one meaningful way.
+
+### Cloud deployment (live demo)
+
 ```
-Internet (any device, any network)
+Internet (any device, anytime — no dependency on any personal machine)
         ↓ HTTPS
-Cloudflare Tunnel (public entry point, zero inbound ports opened)
-        ↓
-Nginx (reverse proxy, single entry point on port 80)
-    ├── /                → static dashboard + landing page
-    ├── /api/            → Node.js backend service
-    ├── /monitor/        → Uptime monitoring service
-    └── /logs/           → Log analytics service
+Nginx (Render) — reverse proxy, single public entry point
+    ├── /                → static dashboard
+    ├── /api/            → Backend API (Render)
+    ├── /monitor/        → Uptime monitor (Render)
+    └── /logs/           → Log analytics (Render)
                                 ↓
-                          Postgres (persistent storage, Docker volume)
+                          Postgres (Neon, permanent free tier)
+
+Backend + Monitor  ──HTTP──▶  Log Analyzer  (/ingest endpoint)
+   (app-level request logging — see "Design Decisions" below)
+
+UptimeRobot pings all 4 services every 5 minutes to prevent
+Render free-tier services from sleeping after 15 min of inactivity.
 ```
 
-All services run as isolated containers, orchestrated via Docker Compose, and communicate over Docker's internal network using service names (not localhost).
+### Local deployment (Docker Compose)
+
+```
+Nginx (local) — reads its own access.log directly
+    ↓
+Log Analyzer — tails the real Nginx log file (shared Docker volume)
+    ↓
+Postgres (local container, persistent via Docker volume)
+```
+
+Both variants share the same core services; only the logging pipeline differs, for reasons explained below.
 
 ## What it does
 
 - **Reverse proxy layer** — Nginx routes all incoming traffic to the correct backend service based on URL path, and serves the dashboard directly.
 - **Uptime monitoring** — a scheduled service (cron-based) checks a configurable list of URLs every 2 minutes, records response time and status, and retries failed checks before marking a site down (avoiding false positives from transient network blips).
-- **Log analytics** — parses Nginx's real access logs in near real-time, storing structured request data (IP, method, path, status code) in Postgres, and exposes aggregation endpoints (top IPs, status code breakdown).
+- **Log analytics** — records structured request data (IP, method, path, status code) in Postgres, and exposes aggregation endpoints (top IPs, status code breakdown).
 - **Live dashboard** — a single page pulling from all services' APIs, auto-refreshing every 15 seconds, showing uptime status, traffic patterns, and recent requests visually.
 - **CI/CD** — every push to `main` automatically builds and publishes all four custom Docker images to Docker Hub via GitHub Actions.
 
 ## Tech Stack
 
 **Infrastructure:** Docker, Docker Compose, Nginx, WSL (Ubuntu)
+**Cloud hosting:** Render (app services), Neon (managed Postgres)
 **Backend:** Node.js, Express
 **Database:** PostgreSQL
 **CI/CD:** GitHub Actions, Docker Hub
-**Exposure:** Cloudflare Tunnel (public HTTPS, zero-cost, no inbound firewall rules)
+**Uptime:** UptimeRobot (external keep-alive monitoring)
+**Local exposure option:** Cloudflare Tunnel (public HTTPS, zero-cost, no inbound firewall rules)
+
+## Design Decisions Worth Explaining
+
+**Why two different logging mechanisms exist.** The local deployment has Nginx write real log files to disk, which the log-analyzer tails directly — the simplest, most complete approach, capturing every request including static files and unmatched routes. Render's free tier does not support shared filesystems between separate services, so this approach doesn't translate to the cloud. Rather than dropping log analytics from the cloud deployment, the backend and monitor services were given lightweight logging middleware that reports each request directly to the log-analyzer's `/ingest` endpoint over HTTP. This is arguably a more realistic pattern for a distributed system (services reporting their own telemetry, rather than a central process tailing another service's files) — the trade-off is that requests Nginx handles without reaching an app (like a 404 for an unmatched route) aren't captured in the cloud variant.
+
+**Why UptimeRobot instead of GitHub Actions for keep-alive pinging.** Render's free tier spins down inactive services after 15 minutes. The first attempt at solving this used a GitHub Actions scheduled workflow (`cron: */14 * * * *`), but GitHub does not guarantee scheduled workflow timing — observed run intervals were 40–60+ minutes in practice, far exceeding Render's sleep threshold and making the fix ineffective. Switching to UptimeRobot (a tool purpose-built for reliable interval monitoring) resolved this correctly, with consistent 5-minute pings.
 
 ## Challenges & How They Were Solved
 
@@ -53,6 +81,12 @@ This project surfaced a number of genuine infrastructure bugs, each diagnosed wi
 5. **Container network detachment after WSL restarts.** After extended downtime, `nginx-container` repeatedly failed with `host not found in upstream "backend"`, despite the backend running fine. Diagnosed via `docker inspect`, which revealed nginx-container's network list was completely empty (`"Networks": {}`) — a stale attachment from a prior session. Fixed with `docker compose up --force-recreate`.
 
 6. **Port conflicts between native and containerized services.** The host's own `apt`-installed Nginx repeatedly competed with the Dockerized version for port 80 on every WSL restart. Diagnosed via `ss -tulpn` (process name `nginx` vs. the expected `docker-proxy`), and permanently resolved by disabling the native service's autostart (`systemctl disable nginx`).
+
+7. **`proxy_pass` path truncation when using a variable upstream.** After deploying to Render, `/api/status` requests reached the backend as just `/api/`, losing the rest of the path. Root cause: using a variable in `proxy_pass` (required for resolving external hostnames dynamically) disables Nginx's normal automatic path-append behavior. Fixed by explicitly forwarding `$request_uri`, or using `rewrite ... break` combined with `$uri` where prefix-stripping was needed.
+
+8. **Cloud logging redesign under a real platform constraint.** The original file-tailing log analytics approach couldn't work on Render, since separate services don't share a filesystem. Resolved by redesigning the logging pipeline around direct HTTP reporting from each service — a genuine architecture change driven by a real deployment constraint, not just a config tweak.
+
+9. **Unreliable scheduled pinging via GitHub Actions.** See "Design Decisions" above — GitHub Actions cron scheduling proved unreliable for sub-15-minute intervals in practice; replaced with UptimeRobot.
 
 ## Running Locally
 
@@ -76,10 +110,10 @@ docker pull sanjeev1208/log-analyzer
 
 ## Production Considerations
 
-This project is architected with production patterns (containerization, service isolation, persistent storage, CI/CD, retry logic) but is a portfolio/demo project, not a commercially deployed product. A real production deployment would additionally require:
+This project is architected with production patterns (containerization, service isolation, persistent storage, CI/CD, retry logic, environment-based configuration) but is a portfolio/demo project, not a commercially deployed product. A real production deployment would additionally require:
 
 - Compliance review for any real user data collected (e.g., IP logging under GDPR/DPDP)
-- Managed database hosting with backups, rather than a local Docker volume
-- Real infrastructure with uptime guarantees, replacing the Cloudflare quick-tunnel (which is explicitly not guaranteed for production use)
-- Secrets management (environment variables/vault), rather than hardcoded credentials in `docker-compose.yml`
+- A paid hosting tier to eliminate free-tier cold starts entirely, rather than working around them
+- Secrets management (a vault/secrets manager), rather than credentials pasted into a platform's environment variable UI
 - Security audit / dependency scanning
+- Capturing infrastructure-level events (e.g., Nginx-level 404s on unmatched routes) that the current app-level cloud logging approach does not see
