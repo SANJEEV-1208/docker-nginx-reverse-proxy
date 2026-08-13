@@ -4,6 +4,7 @@ const fs = require('fs');
 const readline = require('readline');
 
 const app = express();
+app.use(express.json());
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -17,6 +18,21 @@ let lastReadPosition = 0;
 
 const logLineRegex = /^(\S+) - - \[.*?\] "(\S+) (\S+) [^"]*" (\d+) (\d+) "[^"]*" "([^"]*)"/;
 
+function maskIp(ip) {
+  if (!ip) return 'unknown';
+  if (ip.includes(':')) {
+    // IPv6 — keep first 3 groups, mask the rest
+    const parts = ip.split(':');
+    return parts.slice(0, 3).join(':') + ':xxxx';
+  }
+  // IPv4 — keep first 3 octets, mask the last
+  const parts = ip.split('.');
+  if (parts.length === 4) {
+    return `${parts[0]}.${parts[1]}.${parts[2]}.xxx`;
+  }
+  return 'unknown';
+}
+
 async function parseNewLogLines() {
   try {
     if (!fs.existsSync(LOG_PATH)) {
@@ -26,13 +42,13 @@ async function parseNewLogLines() {
 
     const stats = fs.statSync(LOG_PATH);
     if (stats.size === 0) {
-      return; // nothing to read yet
+      return;
     }
     if (stats.size < lastReadPosition) {
       lastReadPosition = 0;
     }
     if (stats.size === lastReadPosition) {
-      return; // no new data since last check
+      return;
     }
 
     const fileHandle = fs.readFileSync(LOG_PATH, 'utf-8');
@@ -45,7 +61,7 @@ async function parseNewLogLines() {
         const [, ip, method, path, status, size, userAgent] = match;
         await pool.query(
           'INSERT INTO log_entries (ip_address, method, path, status_code, response_size, user_agent) VALUES ($1, $2, $3, $4, $5, $6)',
-          [ip, method, path, parseInt(status), parseInt(size), userAgent]
+          [maskIp(ip), method, path, parseInt(status), parseInt(size), userAgent]
         );
       }
     }
@@ -53,7 +69,6 @@ async function parseNewLogLines() {
     lastReadPosition = stats.size;
   } catch (err) {
     console.error('Error parsing log file:', err.message);
-    // deliberately don't crash — just log and try again next cycle
   }
 }
 
@@ -86,14 +101,12 @@ app.get('/status-summary', async (req, res) => {
   res.json(result.rows);
 });
 
-app.use(express.json());
-
 app.post('/ingest', async (req, res) => {
   const { ip, method, path, statusCode, userAgent } = req.body;
   try {
     await pool.query(
       'INSERT INTO log_entries (ip_address, method, path, status_code, response_size, user_agent) VALUES ($1, $2, $3, $4, $5, $6)',
-      [ip || 'unknown', method, path, statusCode, 0, userAgent || '']
+      [maskIp(ip), method, path, statusCode, 0, userAgent || '']
     );
     res.json({ ok: true });
   } catch (err) {
